@@ -66,7 +66,7 @@ with col1:
     try:
         st.image("confusion_matrix_sklearn.png",
                  caption="Confusion Matrix for Random Forest Model (Actual vs. Predicted)",
-             use_column_width=True)
+             use_container_width=True)
     except FileNotFoundError:
         st.error("Please ensure 'confusion_matrix_sklearn.png' is in the main project folder.")
 
@@ -93,7 +93,7 @@ with col3:
     try:
         st.image("shap_summary_bar.png",
                 caption="SHAP Global Feature Importance for Predicting Cancellation",
-                use_column_width=True)
+                use_container_width=True)
     except FileNotFoundError:
         st.error("Please ensure 'shap_summary_bar.png' is in the main project folder.")
 
