@@ -91,7 +91,7 @@ col3, col4 = st.columns(2)
 with col3:
     st.markdown("**SHAP Summary Plot**")
     try:
-        st.image("shap_summary_bar.png",
+        st.image("dental_data_shap_analysis.png",
                 caption="SHAP Global Feature Importance for Predicting Cancellation",
                 use_container_width=True)
     except FileNotFoundError:
