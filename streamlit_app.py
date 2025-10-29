@@ -3,150 +3,200 @@ import pandas as pd
 import joblib
 import numpy as np
 
-
-# --- 1. Page Configuration ---
+# Set page config
 st.set_page_config(
-    page_title="Appointment Cancellation Prediction",
-    page_icon="👨‍⚕️",
+    page_title="Patient Prediction Dashboard",
+    page_icon="🏥",
     layout="wide"
 )
 
-# --- 1. Model and Artifact Loading ---
-@st.cache_resource
-def load_model_artifacts():
-    """Loads the scikit-learn model, scaler, and column list."""
-    try:
-        model = joblib.load('cancellation_model.joblib')
-        scaler = joblib.load('scaler.joblib')
-        model_columns = joblib.load('model_columns.joblib')
-        return model, scaler, model_columns
-    except (FileNotFoundError, IOError):
-        return None, None, None
-
-model, scaler, model_columns = load_model_artifacts()
-
-if model is None:
-    st.error(
-        "🚨 Model files not found! "
-        "Please ensure the .joblib files are in the same directory."
-    )
-    st.stop()
-
-# --- 2. Helper Functions ---
-def get_risk_details(probability):
-    """Categorizes probability into risk levels and provides recommendations."""
-    if probability < 0.30:
-        return "✅ Low Risk", "Standard procedure is likely sufficient. This patient has a strong history of attendance."
-    elif probability < 0.60:
-        return "⚠️ Medium Risk", "A standard confirmation reminder (SMS or call) is recommended. Monitor for any communication from the patient."
-    else:
-        return "🚨 High Risk", "Consider a proactive confirmation call or a more flexible scheduling option. Prioritize confirming this appointment closer to the date."
-
-# --- 3. Application UI ---
-st.title("Patient Appointment Cancellation Predictor")
-st.markdown("This app uses a **Scikit-learn Random Forest** model to predict the probability of a patient cancelling their dental appointment.")
-st.markdown("---")
-
-
-# --- 4. Demonstration Section ---
-st.header("🔬 Model Demonstration on Sample Patients")
-st.markdown("Here are predictions for three sample patients representing different risk profiles.")
-
-sample_data = {
-    "Patient Profile": [
-        "Low Risk (Reliable Patient)",
-        "Medium Risk (Habitual Rescheduler)",
-        "High Risk (History of Cancellations)"
-    ],
-    'total_appointments_last': [10, 15, 4],
-    'total_cancelled_appointment_last': [0, 2, 3],
-    'total_shifted_appointments_last': [1, 8, 0],
-    'tot_on_time_arrivals_last': [9, 5, 1],
-    'total_late_arrivals_last': [0, 0, 0],
-    'lead_time_days': [7, 30, 60],
-    'age_atlast_treatment': [45, 28, 22],
-    'town_distance_last': [5.0, 15.0, 25.0]
-}
-sample_df = pd.DataFrame(sample_data)
+# --- 1. Load All Models and Artifacts ---
+# We use try/except blocks for robust error handling
 
 try:
-    sample_features = sample_df[model_columns]
-    sample_scaled = scaler.transform(sample_features)
-    sample_predictions_proba = model.predict_proba(sample_scaled)
-    cancellation_probabilities = sample_predictions_proba[:, 1]
-    
-    sample_df["Predicted Probability"] = [f"{p:.0%}" for p in cancellation_probabilities]
-    risk_categories, _ = zip(*[get_risk_details(p) for p in cancellation_probabilities])
-    sample_df["Risk Category"] = risk_categories
-    st.dataframe(sample_df)
+    # Load cancellation model
+    model_cancel = joblib.load('cancellation_model.joblib') 
+    features_cancel = joblib.load('model_columns.joblib')
+    st.session_state['cancel_model_loaded'] = True
+except FileNotFoundError:
+    st.error("Error: 'cancellation_model.joblib' or 'model_columns.joblib' not found.")
+    st.info("Please run the 'regenerate_all_models.py' script first.")
+    st.stop()
 except Exception as e:
-    st.error(f"An error occurred during sample prediction: {e}")
+    st.error(f"Error loading cancellation model: {e}")
+    st.info("Please ensure your scikit-learn version matches the one used for training.")
+    st.stop()
 
+# Load the regression model and its features
+try:
+    model_arrival = joblib.load('arrival_time_model.joblib')
+    features_arrival = joblib.load('arrival_time_model_columns.joblib')
+    st.session_state['arrival_model_loaded'] = True
+except FileNotFoundError:
+    st.error("Error: 'arrival_time_model.joblib' or 'arrival_time_model_columns.joblib' not found.")
+    st.info("Please run the 'regenerate_all_models.py' script first.")
+    st.stop()
+except Exception as e:
+    st.error(f"Error loading arrival time model: {e}")
+    st.info("This is often a scikit-learn version mismatch. Please re-train your models.")
+    st.stop()
+
+
+# --- 2. Main Page Title ---
+st.title("🏥 Patient Appointment Prediction Dashboard")
+st.write("This app predicts both **appointment cancellation** and **arrival punctuality** based on patient history.")
 st.markdown("---")
 
 
-# --- 5. Interactive Prediction Section ---
-st.header("🕹️ Interactive Predictor")
-st.markdown("Enter the patient and appointment details below to get a prediction.")
+# --- 3. User Input Form (on Main Page) ---
 
-with st.form("prediction_form"):
-    
-    col1, col2 = st.columns(2)
-    
+def get_user_inputs():
+    """
+    Collects all user inputs from the main page form for BOTH models.
+    """
+    st.subheader("👤 Patient History Inputs")
+    st.write("Fill in the patient's details below and click 'Run Predictions'.")
+
+    # Use columns for a cleaner layout
+    col1, col2, col3 = st.columns(3)
+
     with col1:
-        st.subheader("Patient History")
-        total_appointments = st.number_input('Total Past Appointments', min_value=0, value=5, step=1)
-        past_cancellations = st.number_input('Total Past Cancellations', min_value=0, value=0, step=1)
-        past_reschedules = st.number_input('Total Past Reschedules', min_value=0, value=1, step=1)
-        on_time_arrivals = st.number_input('Total On-Time Arrivals', min_value=0, value=4, step=1)
-        late_arrivals = st.number_input('Total Late Arrivals', min_value=0, value=0, step=1)
+        st.write("**Appointment & Scheduling**")
+        total_appointments_last = st.number_input("Total Past Appointments", min_value=0, value=10)
+        lead_time_days = st.number_input("Lead Days to Appointment", min_value=0, value=7)
+        town_distance_last = st.number_input("Town Distance (km)", min_value=0.0, value=10.0, format="%.2f")
 
     with col2:
-        st.subheader("Appointment & Demographics")
-        lead_time = st.slider('Lead Time (Days)', 0, 365, 14, help="How many days in advance was the appointment booked?")
-        age = st.slider('Patient Age', 5, 100, 35)
-        distance = st.slider('Distance from Clinic (km)', 0.0, 100.0, 10.0, 0.5)
+        st.write("**Patient History**")
+        total_cancelled_appointment_last = st.number_input("Total Past Cancellations", min_value=0, value=1)
+        total_shifted_appointments_last = st.number_input("Total Past Reschedules", min_value=0, value=0)
+        past_app_confirmed_count = st.number_input("Total Past Confirmed Appointments", min_value=0, value=9)
+        
 
-    submitted = st.form_submit_button("Predict Cancellation Risk", type="primary")
+    with col3:
+        st.write("**Patient Demographics & Behavior**")
+        age_atlast_treatment = st.number_input("Patient Age", min_value=0, max_value=120, value=35)
+        gender = st.selectbox("Gender", ["Male", "Female", "Other"])
+        
+    st.markdown("---")
+    st.write("**Detailed Arrival & Waiting History**")
+    
+    col4, col5, col6, col7 = st.columns(4)
 
-if submitted:
+    with col4:
+        tot_on_time_arrivals_last = st.number_input("Total Past On-Time Arrivals", min_value=0, value=8)
+    with col5:
+        total_late_arrivals_last = st.number_input("Total Past Late Arrivals", min_value=0, value=1)
+    with col6:
+        past_avg_timediff_early = st.number_input("Past Avg. Mins Early", min_value=0.0, value=2.0, format="%.2f")
+    with col7:
+        past_avg_timediff_late = st.number_input("Past Avg. Mins Late", min_value=0.0, value=5.0, format="%.2f")
+
+    past_avg_waiting_time = st.number_input("Past Avg. Waiting Time (Mins)", min_value=0.0, value=10.0, format="%.2f")
+
+
+    # Create a single dictionary to hold all inputs
     data = {
-        'total_cancelled_appointment_last': past_cancellations,
-        'total_shifted_appointments_last': past_reschedules,
-        'tot_on_time_arrivals_last': on_time_arrivals,
-        'total_late_arrivals_last': late_arrivals,
-        'total_appointments_last': total_appointments,
-        'lead_time_days': lead_time,
-        'age_atlast_treatment': age,
-        'town_distance_last': distance
+        # --- Features for Cancellation Model ---
+        'total_cancelled_appointment_last': total_cancelled_appointment_last,
+        'total_shifted_appointments_last': total_shifted_appointments_last,
+        'tot_on_time_arrivals_last': tot_on_time_arrivals_last,
+        'total_late_arrivals_last': total_late_arrivals_last,
+        'total_appointments_last': total_appointments_last,
+        'lead_time_days': lead_time_days,
+        'age_atlast_treatment': age_atlast_treatment,
+        'town_distance_last': town_distance_last,
+
+        # --- Features for Arrival Time Model ---
+        # Shared features (using the same input variable)
+        'past_appointment_count': total_appointments_last,
+        'past_cancel_count': total_cancelled_appointment_last,
+        'past_shift_count': total_shifted_appointments_last,
+        'ageat_app': age_atlast_treatment,
+        
+        # New features
+        'gender': gender,
+        'past_app_confirmed_count': past_app_confirmed_count,
+        'past_avg_timediff_late': past_avg_timediff_late,
+        'past_avg_timediff_early': past_avg_timediff_early,
+        'past_avg_waiting_time': past_avg_waiting_time
     }
     
-    input_df = pd.DataFrame(data, index=[0])
-    input_df_ordered = input_df[model_columns]
+    st.markdown("---")
+    # The button is now part of the main page form
+    predict_button = st.button("Run Predictions", type="primary")
 
-    st.subheader("Patient Input Summary")
-    st.write(input_df_ordered)
+    return data, predict_button
 
-    try:
-        input_scaled = scaler.transform(input_df_ordered)
-        prediction_proba = model.predict_proba(input_scaled)
-        cancellation_prob = prediction_proba[0][1]
+# Collect inputs and button state from the form function
+inputs, predict_button = get_user_inputs()
 
-        risk_category, recommended_action = get_risk_details(cancellation_prob)
 
-        st.subheader("🔮 Prediction Result")
+# --- 4. Main Page Prediction Logic ---
+
+if predict_button:
+    
+    st.header("📈 Prediction Results")
+    pred_col1, pred_col2 = st.columns(2)
+
+    # --- Prediction 1: Cancellation (Existing Model) ---
+    with pred_col1:
+        st.subheader("1. Appointment Cancellation")
         
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric(label="Cancellation Probability", value=f"{cancellation_prob:.0%}")
-        with col2:
-            st.markdown(f"**{risk_category}**")
-        
-        st.progress(cancellation_prob)
-        st.info(f"**Recommended Action:** {recommended_action}", icon="💡")
+        try:
+            # Create DataFrame for cancellation model
+            input_df_cancel = pd.DataFrame([inputs], columns=features_cancel)
+            
+            # Make prediction
+            prediction_cancel = model_cancel.predict(input_df_cancel)[0]
+            prediction_proba_cancel = model_cancel.predict_proba(input_df_cancel)[0]
+            
+            # Display result
+            if prediction_cancel == 1:
+                st.error(f"**Prediction: Patient will CANCEL** \n\n(Probability: {prediction_proba_cancel[1]:.2%})")
+            else:
+                st.success(f"**Prediction: Patient will ATTEND** \n\n(Probability: {prediction_proba_cancel[0]:.2%})")
+        except Exception as e:
+            st.error(f"An error occurred during cancellation prediction: {e}")
 
-    except Exception as e:
-        st.error(f"An error occurred during prediction: {e}")
+    # --- Prediction 2: Arrival Time (New Model) ---
+    with pred_col2:
+        st.subheader("2. Patient Arrival Time")
 
+        # Re-create the engineered features from your training script
+        epsilon = 1  # To avoid division by zero
+        inputs['past_cancel_rate'] = inputs['past_cancel_count'] / (inputs['past_appointment_count'] + epsilon)
+        inputs['past_shift_rate'] = inputs['past_shift_count'] / (inputs['past_appointment_count'] + epsilon)
+        inputs['past_app_confirmed_rate'] = inputs['past_app_confirmed_count'] / (inputs['past_appointment_count'] + epsilon)
+
+        try:
+            input_df_arrival = pd.DataFrame([inputs], columns=features_arrival)
+            
+            # Make prediction. The pipeline handles all scaling and encoding.
+            prediction_arrival = model_arrival.predict(input_df_arrival)[0]
+            prediction_mins = round(prediction_arrival, 2)
+
+            # Display result in a user-friendly way
+            if prediction_mins > 1:
+                st.warning(f"**Prediction: Patient will be {abs(prediction_mins)} minutes LATE**")
+            elif prediction_mins < -1:
+                st.info(f"**Prediction: Patient will be {abs(prediction_mins)} minutes EARLY**")
+            else:
+                st.success(f"**Prediction: Patient will be ON TIME** (within 1 minute)")
+
+            st.caption(f"Raw model output: {prediction_mins} minutes. (Positive = Late, Negative = Early)")
+
+        except Exception as e:
+            st.error(f"An error occurred during arrival time prediction: {e}")
+            st.error("Please check if the input data matches the model's requirements.")
+
+else:
+    st.info("Please fill in the patient data above and click 'Run Predictions'.")
+
+# --- 5. (Optional) Show Raw Input Data ---
 st.markdown("---")
-st.markdown("*Disclaimer: This prediction is based on historical data and is not a guarantee of future behavior.*")
+with st.expander("Show Raw Input Data"):
+    st.write("The following data was collected from the form and used for prediction:")
+    
+    # Display the combined 'inputs' dictionary
+    st.json(inputs)
